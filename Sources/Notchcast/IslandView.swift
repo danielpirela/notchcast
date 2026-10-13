@@ -46,7 +46,6 @@ struct IslandView: View {
     private func header(_ geometry: IslandGeometry) -> some View {
         HStack(spacing: 0) {
             HStack(spacing: 6) {
-                SourceBadge(source: speech.source)
                 DriftView(mood: driftMood)
                 LevelBars(level: speech.level, active: speech.phase == .speaking || speech.phase == .summarizing,
                           thinking: speech.phase == .summarizing)
@@ -212,6 +211,12 @@ struct IslandView: View {
                 }
             }
             controls
+                .frame(maxWidth: .infinity)
+                .overlay(alignment: .bottomLeading) {
+                    EngineLabel(source: speech.source)
+                        .padding(.leading, 22)
+                        .padding(.bottom, 2)
+                }
         }
         .padding(.bottom, 14)
     }
@@ -320,6 +325,29 @@ struct SourceBadge: View {
         switch source {
         case .mlx: return "Resumen local con MLX"
         case .ollama: return "Resumen local con Ollama"
+        case .full: return "Respuesta completa"
+        }
+    }
+}
+
+/// Engine in use, shown at the bottom-left of the expanded island.
+struct EngineLabel: View {
+    var source: SpeechController.Source
+
+    var body: some View {
+        HStack(spacing: 5) {
+            SourceBadge(source: source)
+            Text(name)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(IslandPalette.textDim)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var name: String {
+        switch source {
+        case .mlx: return "MLX"
+        case .ollama: return "Ollama"
         case .full: return "Respuesta completa"
         }
     }
