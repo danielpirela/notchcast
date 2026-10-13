@@ -7,9 +7,11 @@ struct IslandView: View {
     @ObservedObject var island: IslandController
     @ObservedObject var speech: SpeechController
     @ObservedObject var monitor: AgentMonitor
+    @ObservedObject var queue: AnswerQueue
     let actions: IslandActions
 
     private var showsStatus: Bool { island.content == .status }
+    private var showsInbox: Bool { island.content == .inbox }
 
     var body: some View {
         let geometry = island.geometry
@@ -21,13 +23,25 @@ struct IslandView: View {
             shape.fill(Color.black)
             VStack(spacing: 0) {
                 Group {
-                    if showsStatus { statusHeader(geometry) } else { header(geometry) }
+                    if showsInbox {
+                        inboxHeader(geometry)
+                    } else if showsStatus {
+                        statusHeader(geometry)
+                    } else {
+                        header(geometry)
+                    }
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { actions.tap() }
                 if island.visual == .expanded {
                     Group {
-                        if showsStatus { statusBody } else { expandedBody }
+                        if showsInbox {
+                            inboxBody
+                        } else if showsStatus {
+                            statusBody
+                        } else {
+                            expandedBody
+                        }
                     }
                     .transition(.opacity.combined(with: .offset(y: -8)))
                 }
@@ -53,6 +67,12 @@ struct IslandView: View {
             .frame(width: 92, alignment: .leading)
             Spacer(minLength: geometry.hasNotch ? geometry.notch.width : 8)
             HStack(spacing: 8) {
+                if !queue.isEmpty {
+                    Text("+\(queue.pending.count)")
+                        .font(.system(size: 11, weight: .bold).monospacedDigit())
+                        .foregroundStyle(IslandPalette.engine)
+                        .help("\(queue.pending.count) en cola")
+                }
                 Text(headerTrailing)
                     .font(.system(size: 12, weight: .medium).monospacedDigit())
                     .foregroundStyle(IslandPalette.text.opacity(0.85))
@@ -188,6 +208,11 @@ struct IslandView: View {
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 10) {
+                        if let project = queue.current?.project {
+                            Text(project)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(IslandPalette.engine)
+                        }
                         if speech.phase == .summarizing {
                             Text("Resumiendo con \(speech.source == .ollama ? "Ollama" : "MLX")…")
                                 .font(.system(size: 14))
@@ -210,6 +235,10 @@ struct IslandView: View {
                     withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(paragraph.id, anchor: .center) }
                 }
             }
+            if !queue.isEmpty {
+                PendingList(queue: queue, actions: actions)
+                    .padding(.horizontal, 22)
+            }
             controls
                 .frame(maxWidth: .infinity)
                 .overlay(alignment: .bottomLeading) {
@@ -231,8 +260,57 @@ struct IslandView: View {
                 .disabled(!speech.isBusy)
             ControlButton(symbol: "arrow.counterclockwise", label: "Repetir", action: actions.repeatLast)
                 .disabled(speech.lastText.isEmpty)
+            ControlButton(symbol: "forward.end.fill", label: "Siguiente", action: actions.next)
+                .disabled(queue.isEmpty)
             ControlButton(symbol: "chevron.up", label: "Cerrar", action: actions.close)
         }
+    }
+
+    // MARK: Inbox (answers that arrived while you were away or stopped)
+
+    private func inboxHeader(_ geometry: IslandGeometry) -> some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 6) {
+                DriftView(mood: .waiting)
+                Text(queue.pending.count == 1 ? "1 respuesta" : "\(queue.pending.count) respuestas")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(IslandPalette.engine)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            .frame(width: 92, alignment: .leading)
+            Spacer(minLength: geometry.hasNotch ? geometry.notch.width : 8)
+            Button(action: actions.next) {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(Color.white.opacity(0.18)))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Escuchar")
+            .accessibilityLabel("Escuchar respuestas pendientes")
+            .frame(width: 66, alignment: .trailing)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: geometry.headerHeight)
+    }
+
+    private var inboxBody: some View {
+        VStack(spacing: 12) {
+            ScrollView(.vertical, showsIndicators: false) {
+                PendingList(queue: queue, actions: actions)
+                    .padding(.horizontal, 22)
+                    .padding(.top, 6)
+            }
+            HStack(spacing: 22) {
+                ControlButton(symbol: "play.fill", label: "Escuchar", action: actions.next)
+                    .disabled(queue.isEmpty)
+                ControlButton(symbol: "chevron.up", label: "Cerrar", action: actions.close)
+            }
+        }
+        .padding(.bottom, 14)
     }
 
     private func attributed(_ paragraph: Paragraph) -> AttributedString {
@@ -327,6 +405,54 @@ struct SourceBadge: View {
         case .ollama: return "Resumen local con Ollama"
         case .full: return "Respuesta completa"
         }
+    }
+}
+
+/// Answers waiting to be read: tap one to hear it now, or discard it.
+struct PendingList: View {
+    @ObservedObject var queue: AnswerQueue
+    let actions: IslandActions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("En cola")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(IslandPalette.textDim)
+            ForEach(queue.pending) { answer in
+                HStack(spacing: 8) {
+                    Button { actions.play(answer.id) } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "play.circle.fill").font(.system(size: 13))
+                            Text(answer.project).font(.system(size: 12, weight: .semibold))
+                            TimelineView(.periodic(from: .now, by: 30)) { context in
+                                Text(Self.age(answer.receivedAt, now: context.date))
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(IslandPalette.textDim)
+                            }
+                        }
+                        .foregroundStyle(IslandPalette.text)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Escuchar respuesta de \(answer.project)")
+                    Spacer()
+                    Button { actions.discard(answer.id) } label: {
+                        Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(IslandPalette.textDim)
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Descartar respuesta de \(answer.project)")
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private static func age(_ date: Date, now: Date) -> String {
+        let minutes = Int(now.timeIntervalSince(date) / 60)
+        return minutes < 1 ? "ahora" : "hace \(minutes) min"
     }
 }
 

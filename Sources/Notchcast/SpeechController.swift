@@ -67,13 +67,14 @@ final class SpeechController: ObservableObject {
     // MARK: - Commands
 
     /// Entry point for a new answer: summarizes it locally when enabled, then speaks.
-    func handle(_ text: String, config: AppConfig) {
+    func handle(_ text: String, config: AppConfig, intro: String? = nil) {
         cancelSummary()
         halt()
         lastOriginal = text
+        let withIntro = { (body: String) in intro.map { "\($0)\n\(body)" } ?? body }
         guard config.summarize, text.count >= config.minChars else {
             source = .full
-            return speak(text)
+            return speak(withIntro(text))
         }
 
         source = config.backend == .mlx ? .mlx : .ollama
@@ -87,11 +88,11 @@ final class SpeechController: ObservableObject {
             guard let self, request == self.summaryRequest, self.phase == .summarizing else { return }
             switch result {
             case .success(let summary):
-                self.speak(summary)
+                self.speak(withIntro(summary))
             case .failure(let failure):
                 NSLog("Notchcast: summary failed, speaking full answer: \(failure)")
                 self.source = .full
-                self.speak(text)
+                self.speak(withIntro(text))
             }
         }
     }

@@ -15,6 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var monitor: AgentMonitor!
     private var statusItemToggle: NSMenuItem!
     private var waveUntil = Date.distantPast
+    private let queue = AnswerQueue()
+    /// After a manual stop the queue waits for "Siguiente" or a new answer instead of moving on.
+    private var queueHeld = false
+    private var awayWatcher: Timer?
     private var island: IslandController!
     private var server: IPCServer!
     private var lastLongPress = Date.distantPast
@@ -31,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         worker.start()
         speech = SpeechController(worker: worker, sampleRate: Paths.voiceSampleRate())
         monitor = AgentMonitor()
-        island = IslandController(speech: speech, monitor: monitor, actions: makeActions())
+        island = IslandController(speech: speech, monitor: monitor, queue: queue, actions: makeActions())
         speech.onPhaseChange = { [weak self] phase in self?.phaseChanged(phase) }
         monitor.onChange = { [weak self] in self?.refreshIsland() }
         setUpStatusItem()
@@ -54,9 +58,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             tap: { [weak self] in self?.tapIsland() },
             longPress: { [weak self] in self?.longPressIsland() },
             togglePause: { [weak self] in self?.speech.togglePause() },
-            stop: { [weak self] in self?.speech.stop() },
+            stop: { [weak self] in self?.stopSpeaking() },
             repeatLast: { [weak self] in self?.speech.repeatLast() },
-            close: { [weak self] in self?.closeIsland() }
+            close: { [weak self] in self?.closeIsland() },
+            next: { [weak self] in self?.skipToNext() },
+            play: { [weak self] id in self?.play(id) },
+            discard: { [weak self] id in
+                self?.queue.remove(id)
+                self?.refreshIsland()
+            }
         )
     }
 
@@ -68,7 +78,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func longPressIsland() {
         lastLongPress = Date()
+        stopSpeaking()
+    }
+
+    // MARK: - Answer queue
+
+    private var userIsAway: Bool { AnswerQueue.secondsSinceUserInput >= Double(config.awayAfterSeconds) }
+
+    private func receive(_ text: String, session: String, project: String) {
+        queue.enqueue(QueuedAnswer(session: session, project: project, text: text, receivedAt: Date()))
+        queueHeld = false
+        if speech.isBusy || (speech.phase == .finished && Date() < waveUntil) {
+            refreshIsland()  // it plays when the current answer ends
+        } else if userIsAway {
+            watchForReturn()
+            refreshIsland()
+        } else {
+            playNext()
+        }
+    }
+
+    private func playNext() {
+        guard !speech.isBusy, let answer = queue.next() else { return refreshIsland() }
+        let others = Set(monitor.sessions.keys).union(queue.recentSessions(excluding: answer.session))
+            .subtracting([answer.session])
+        let intro = AnswerQueue.intro(for: answer, multipleSessions: !others.isEmpty)
+        speech.handle(answer.text, config: config, intro: intro)
+    }
+
+    private func stopSpeaking() {
+        queueHeld = true
         speech.stop()
+    }
+
+    private func skipToNext() {
+        queueHeld = false
+        speech.stop()
+        playNext()
+    }
+
+    private func play(_ id: UUID) {
+        queue.moveToFront(id)
+        skipToNext()
+    }
+
+    /// While you're away, answers wait; as soon as you touch the keyboard or mouse they play.
+    private func watchForReturn() {
+        guard awayWatcher == nil else { return }
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard !self.queue.isEmpty else {
+                    self.awayWatcher?.invalidate()
+                    self.awayWatcher = nil
+                    return
+                }
+                if AnswerQueue.secondsSinceUserInput < 3 {
+                    self.awayWatcher?.invalidate()
+                    self.awayWatcher = nil
+                    self.queueHeld = false
+                    self.playNext()
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        awayWatcher = timer
     }
 
     private func closeIsland() {
@@ -79,10 +153,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func phaseChanged(_ phase: SpeechController.Phase) {
         if phase == .finished {
-            // Let Drift wave goodbye before the island closes or returns to Claude's status.
+            // Let Drift wave goodbye, then read the next queued answer (or settle the island).
             waveUntil = Date().addingTimeInterval(1.1)
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.15) { [weak self] in
-                MainActor.assumeIsolated { self?.refreshIsland() }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if !self.queueHeld, !self.queue.isEmpty, !self.userIsAway {
+                        self.playNext()
+                    } else {
+                        if !self.queue.isEmpty { self.watchForReturn() }
+                        self.refreshIsland()
+                    }
+                }
             }
         }
         refreshIsland()
@@ -93,6 +175,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let speaking = speech.isBusy || (speech.phase == .finished && Date() < waveUntil)
         if speaking {
             island.content = .speech
+            island.show()
+        } else if !queue.isEmpty {
+            if island.mode != .expanded { island.content = .inbox }
             island.show()
         } else if config.showAgentStatus, monitor.isActive {
             if island.mode != .expanded { island.content = .status }
@@ -209,9 +294,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 speech.store(text)
                 return ["ok": true, "muted": true]
             }
-            speech.handle(text, config: config)
+            let session = request["session"] as? String ?? ""
+            let project = request["project"] as? String ?? ""
+            receive(text, session: session.isEmpty ? "manual" : session,
+                    project: project.isEmpty ? "Claude Code" : project)
         case "store": speech.store(text)
-        case "stop": speech.stop()
+        case "stop": stopSpeaking()
+        case "next": skipToNext()
         case "pause": speech.pause()
         case "resume": speech.resume()
         case "toggle": speech.togglePause()
@@ -267,6 +356,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                           "tool": $0.tool ?? "", "subagents": $0.subagents.count] as [String: Any] }
                 ?? [:],
             "activeSessions": monitor.activeSessions.count,
+            "queue": queue.pending.map(\.project),
+            "currentProject": queue.current?.project ?? "",
+            "away": userIsAway,
             "lastTextLength": speech.lastText.count,
         ]
     }

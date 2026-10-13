@@ -62,6 +62,9 @@ struct IslandActions {
     var stop: () -> Void
     var repeatLast: () -> Void
     var close: () -> Void
+    var next: () -> Void
+    var play: (UUID) -> Void
+    var discard: (UUID) -> Void
 }
 
 /// Owns the borderless panel and the island's open/closed state.
@@ -69,7 +72,7 @@ struct IslandActions {
 final class IslandController: ObservableObject {
     enum Mode: String { case hidden, compact, expanded }
     /// What the island is about: reading an answer aloud, or Claude Code's live status.
-    enum Content: String { case speech, status }
+    enum Content: String { case speech, status, inbox }
 
     @Published private(set) var mode: Mode = .hidden
     @Published private(set) var visual: IslandVisual = .closed
@@ -80,8 +83,8 @@ final class IslandController: ObservableObject {
     private let spring = Animation.spring(response: 0.42, dampingFraction: 0.78)
     private let settle: TimeInterval = 0.5
 
-    init(speech: SpeechController, monitor: AgentMonitor, actions: IslandActions) {
-        let view = IslandView(island: self, speech: speech, monitor: monitor, actions: actions)
+    init(speech: SpeechController, monitor: AgentMonitor, queue: AnswerQueue, actions: IslandActions) {
+        let view = IslandView(island: self, speech: speech, monitor: monitor, queue: queue, actions: actions)
         panel = IslandPanel(content: view)
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main

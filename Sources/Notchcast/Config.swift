@@ -18,6 +18,8 @@ struct AppConfig: Codable, Equatable {
     var minChars = 300
     /// Show what Claude Code is doing (thinking, tools, subagents) while it works.
     var showAgentStatus = true
+    /// With no keyboard/mouse input for this long, answers wait in the queue until you're back.
+    var awayAfterSeconds = 120
 
     init() {}
 
@@ -31,6 +33,7 @@ struct AppConfig: Codable, Equatable {
         ollamaURL = try c.decodeIfPresent(String.self, forKey: .ollamaURL) ?? defaults.ollamaURL
         minChars = try c.decodeIfPresent(Int.self, forKey: .minChars) ?? defaults.minChars
         showAgentStatus = try c.decodeIfPresent(Bool.self, forKey: .showAgentStatus) ?? defaults.showAgentStatus
+        awayAfterSeconds = try c.decodeIfPresent(Int.self, forKey: .awayAfterSeconds) ?? defaults.awayAfterSeconds
     }
 
     static func load() -> AppConfig {

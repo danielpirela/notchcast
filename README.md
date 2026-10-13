@@ -9,8 +9,11 @@ costs API credits, and no audio is written to disk.
 
 - **Local summaries (on by default):** long answers are condensed into 2–4 spoken sentences by a small model running on your Mac ([MLX](https://github.com/ml-explore/mlx) by default, or [Ollama](https://ollama.com)). Turn it off to hear the exact answer.
 - **Clean reading:** markdown is stripped; code blocks, tables, URLs and long file paths are skipped.
-- **Notch island:** engine icon, live audio-level bars, a timer and a quick stop button. Click to see the text with the current sentence highlighted, plus Pause/Resume, Stop and Repeat. Long-press to stop instantly.
-- **Menu bar:** Repetir último, Leer último (show the full answer without speaking), Resumir con IA local (on/off), Motor de resumen (MLX / Ollama), Silenciar, Salir.
+- **Drift, the mascot:** a pixel jellyfish living in the notch. It thinks while the summary is made, talks with the audio level, sleeps when paused and waves goodbye.
+- **Notch island:** Drift, live audio-level bars, a timer and a quick stop button. Click to see the text with the current sentence highlighted, the engine in use (MLX / Ollama) and Pause/Resume, Stop, Repeat, Next. Long-press to stop instantly.
+- **Live Claude Code status:** while Claude works, Drift shows it: thinking, typing on a laptop while tools run, splitting into mini copies for each subagent, a question face when Claude asks you something, an alert when it needs permission. Several sessions are listed when expanded.
+- **Answer queue:** answers from several sessions are read one after another (with "En notchcast-site…" when you juggle projects), never on top of each other. If you're away from the Mac they wait and play when you're back.
+- **Menu bar:** Repetir último, Leer último (show the full answer without speaking), Resumir con IA local (on/off), Motor de resumen (MLX / Ollama), Mostrar estado de Claude (on/off), Silenciar, Salir.
 - On Macs without a notch it shows as a pill at the top center.
 
 ## Requirements
@@ -51,6 +54,7 @@ Options:
 ./install.sh --voice es_ES-sharvard-medium   # any voice from rhasspy/piper-voices
 ./install.sh --no-summary                    # skip MLX + the 2.3 GB model, summaries off
 ./install.sh --yes                           # no prompts
+./install.sh --skip-settings                 # redeploy the app without touching settings.json
 ```
 
 Re-running `install.sh` is safe: it skips what's already there and never adds the hook twice. It's
@@ -65,7 +69,7 @@ answer ──▶ summarize.py (local model, one shot) ──▶ 2–4 sentences 
 ```
 
 - **Switch:** menu bar → **Resumir con IA local**. On by default. When off, the exact answer is read.
-- **Engine:** menu bar → **Motor de resumen** → **MLX (nativo)** (default) or **Ollama**. The island shows which one is in use: a chip icon for MLX, a server icon for Ollama, a text icon when reading the full answer.
+- **Engine:** menu bar → **Motor de resumen** → **MLX (nativo)** (default) or **Ollama**. The expanded island shows which one was used (a check-engine light labelled MLX, Ollama, or "Respuesta completa").
 - **No idle memory:** the model is loaded only to summarize and is freed *before* the voice starts. MLX runs in a short-lived process that exits after each summary; Ollama is called with `keep_alive: 0`, so it unloads right away.
 - **Fast path:** answers shorter than 300 characters are read as-is (summarizing them would only add delay).
 - **Always speaks:** if the summary fails (engine missing, error or 60 s timeout), the full answer is read instead. Details go to `~/.claude/notchcast/logs/summarizer.log`.
@@ -96,16 +100,28 @@ these defaults):
   "mlxModel": "Qwen3-4B-Instruct-2507-4bit",
   "ollamaModel": "qwen3:4b-instruct-2507-q4_K_M",
   "ollamaURL": "http://127.0.0.1:11434",
-  "minChars": 300
+  "minChars": 300,
+  "showAgentStatus": true,
+  "awayAfterSeconds": 120
 }
 ```
 
 `mlxModel` is a folder name inside `~/.claude/notchcast/models/`. Any MLX chat model from
 [mlx-community](https://huggingface.co/mlx-community) works; smaller ones are faster but summarize worse.
 
+## Several sessions and the queue
+
+- Each answer carries its session and project. When more than one session is active, the voice starts with the project ("En notchcast-site. …"); old answers say how long ago ("Hace 5 minutos, en notchcast. …").
+- A new answer never interrupts the one playing: it waits in the queue (the island shows **+N**). If the same session sends a newer answer before the old one is read, only the newest is kept.
+- **Siguiente** skips to the next answer; in the expanded island you can play any queued answer or discard it.
+- After you stop an answer by hand, the queue waits for **Siguiente** or the next new answer instead of carrying on.
+- **Away mode:** with no keyboard or mouse input for 2 minutes (`awayAfterSeconds` in `config.json`), answers are held and the island shows how many are waiting. They play as soon as you touch the Mac.
+- Summaries are made only when an answer's turn comes, so no model sits in memory while answers wait. The queue lives in memory only.
+
 ## Claude Code configuration
 
-This is the only change made to `~/.claude/settings.json` (merged with your existing hooks):
+The installer merges these hooks into `~/.claude/settings.json` (your existing hooks are kept). The `Stop`
+hook that speaks the answer:
 
 ```json
 {
@@ -131,6 +147,18 @@ This is the only change made to `~/.claude/settings.json` (merged with your exis
 - If the app isn't running, the hook opens it with `open -g` and retries for a few seconds.
 - If Claude Code doesn't pick up the new hook in an open session, restart the session.
 
+For the live status, the same small script is added, async with a 5 s timeout, to `UserPromptSubmit`,
+`PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, `SubagentStop`, `PermissionRequest`,
+`Notification`, `Stop`, `StopFailure` and `SessionEnd`:
+
+```json
+{ "type": "command", "command": "\"$HOME/.claude/notchcast/hook/event.sh\"", "async": true, "timeout": 5 }
+```
+
+`event.sh` forwards the event to the app over the local socket with `nc` and exits in a few milliseconds.
+It never launches the app; if Notchcast isn't running the event is dropped. Turn the status off from the
+menu bar (**Mostrar estado de Claude**) or with `showAgentStatus` in `config.json`.
+
 ## Files
 
 Everything lives in `~/.claude/notchcast/`:
@@ -140,7 +168,8 @@ Everything lives in `~/.claude/notchcast/`:
 | `Sources/Notchcast/` | Swift app (AppKit + SwiftUI + AVAudioEngine) |
 | `tts_worker.py` | Long-lived Piper process: keeps the voice loaded (~300 MB), streams raw PCM per sentence |
 | `summarize.py` | One-shot summarizer (MLX or Ollama); exits after each summary |
-| `hook/speak.py` | The `Stop` hook: cleans markdown and sends the text over a Unix socket |
+| `hook/speak.py` | The `Stop` hook: cleans markdown and sends the answer (with its session) over a Unix socket |
+| `hook/event.sh` | Status hook: forwards Claude Code events (thinking, tools, subagents…) to the app |
 | `build.sh` | Builds `Notchcast.app` with SwiftPM |
 | `install.sh` / `uninstall.sh` | Setup and removal |
 | `config.json` | Summary settings (see above) |
@@ -187,7 +216,7 @@ Spanish voices worth trying: `es_MX-claude-high` (neutral Latin American), `es_A
 nc() { "$HOME/.claude/notchcast/venv/bin/python" -I "$HOME/.claude/notchcast/hook/speak.py" "$@"; }
 nc --cmd speak text="Hola, esto es una prueba."
 nc --cmd status                 # phase, island mode, engine, audio level, spoken text...
-nc --cmd pause                  # also: resume, stop, repeat, showLast
+nc --cmd pause                  # also: resume, stop, next, repeat, showLast
 nc --cmd mute on=true           # or on=false
 nc --cmd summarize on=false     # summaries on/off
 nc --cmd backend name=ollama    # or name=mlx
