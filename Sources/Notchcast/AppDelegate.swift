@@ -320,6 +320,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             updateConfig { $0.backend = backend }
         case "status": break
+        case "events": return ["ok": true, "events": monitor.recentEvents]
         case "quit":
             DispatchQueue.main.async { NSApp.terminate(nil) }
         default:
@@ -352,7 +353,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "spokenText": speech.lastText,
             "content": island.content.rawValue,
             "showAgentStatus": config.showAgentStatus,
-            "agent": monitor.focus.map { ["project": $0.project, "activity": $0.activity.rawValue,
+            "agent": monitor.focus.map { ["project": $0.project, "activity": $0.shown.rawValue,
                                           "tool": $0.tool ?? "", "subagents": $0.subagents.count] as [String: Any] }
                 ?? [:],
             "activeSessions": monitor.activeSessions.count,

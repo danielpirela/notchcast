@@ -169,47 +169,64 @@ struct DriftView: View {
     }
 }
 
-/// Drift plus one mini Drift per running subagent. A new subagent plays a "cell division":
-/// Drift stretches, then the copy splits off and slides into place.
-struct DriftColony: View {
+/// The orchestrator's Drift. When a subagent is born it stretches, as if a cell were dividing.
+struct ParentDrift: View {
     var mood: DriftMood
     var subagents: Int
 
-    @State private var clones = 0
     @State private var stretched = false
-    private static let maxClones = 2
+
+    var body: some View {
+        DriftView(mood: mood)
+            .scaleEffect(x: stretched ? 1.22 : 1, y: stretched ? 0.84 : 1, anchor: .trailing)
+            .onChange(of: subagents) { old, new in
+                guard new > old else { return }
+                withAnimation(.easeOut(duration: 0.18)) { stretched = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.55)) { stretched = false }
+                }
+            }
+    }
+}
+
+/// One mini Drift per running subagent, on the right side of the island. A new one flies in from the
+/// parent on the left (`travel` = distance between the two sides), completing the division.
+struct SubagentSwarm: View {
+    var count: Int
+    var travel: CGFloat
+
+    @State private var shown = 0
+    private static let maxVisible = 2
 
     var body: some View {
         HStack(spacing: 1) {
-            DriftView(mood: mood)
-                .scaleEffect(x: stretched ? 1.22 : 1, y: stretched ? 0.84 : 1, anchor: .center)
-                .zIndex(1)
-            ForEach(0..<min(clones, Self.maxClones), id: \.self) { _ in
+            ForEach(0..<min(shown, Self.maxVisible), id: \.self) { _ in
                 DriftView(mood: .working, pixel: 1)
                     .transition(.asymmetric(
-                        insertion: .offset(x: -16).combined(with: .scale(scale: 1.5)).combined(with: .opacity),
+                        insertion: .offset(x: -travel).combined(with: .scale(scale: 1.5)),
                         removal: .scale(scale: 0.4).combined(with: .opacity)))
             }
-            if clones > Self.maxClones {
-                Text("+\(clones - Self.maxClones)")
+            if shown > Self.maxVisible {
+                Text("+\(shown - Self.maxVisible)")
                     .font(.system(size: 10, weight: .bold).monospacedDigit())
                     .foregroundStyle(IslandPalette.engine)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .transition(.opacity)
             }
         }
-        .onAppear { clones = subagents }
-        .onChange(of: subagents) { old, new in
-            guard new > old else {
-                withAnimation(.easeOut(duration: 0.3)) { clones = new }
-                return
-            }
-            withAnimation(.easeOut(duration: 0.18)) { stretched = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-                withAnimation(.spring(response: 0.45, dampingFraction: 0.62)) {
-                    stretched = false
-                    clones = new
+        .onAppear { shown = count }
+        .onChange(of: count) { old, new in
+            if new > old {
+                // Wait for the parent's stretch, then send the copy across the notch.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) { shown = new }
                 }
+            } else {
+                withAnimation(.easeOut(duration: 0.3)) { shown = new }
             }
         }
+        .help(count == 1 ? "1 subagente trabajando" : "\(count) subagentes trabajando")
         .accessibilityHidden(true)
     }
 }

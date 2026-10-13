@@ -16,11 +16,18 @@ final class AgentMonitor: ObservableObject {
         var activity: Activity
         var tool: String?
         var subagents: Set<String> = []
+        /// Tool calls still running (by tool_use_id); parallel calls finish out of order.
+        var runningTools: [String: String] = [:]
         var startedAt: Date
         var updatedAt: Date
+
+        /// Background subagents keep a session busy after Claude's own turn ends.
+        var shown: Activity { activity == .idle && !subagents.isEmpty ? .working : activity }
     }
 
     @Published private(set) var sessions: [String: Session] = [:]
+    /// Last events received, for troubleshooting (`--cmd events`). Memory only.
+    private(set) var recentEvents: [String] = []
     var onChange: (() -> Void)?
 
     /// Sessions that went quiet this long (crash, closed terminal) are forgotten.
@@ -39,14 +46,14 @@ final class AgentMonitor: ObservableObject {
     var focus: Session? {
         let rank: [Activity: Int] = [.question: 4, .waiting: 3, .working: 2, .thinking: 1, .idle: 0]
         return sessions.values
-            .filter { $0.activity != .idle }
-            .max { (rank[$0.activity]!, $0.updatedAt) < (rank[$1.activity]!, $1.updatedAt) }
+            .filter { $0.shown != .idle }
+            .max { (rank[$0.shown]!, $0.updatedAt) < (rank[$1.shown]!, $1.updatedAt) }
     }
 
     var isActive: Bool { focus != nil }
 
     var activeSessions: [Session] {
-        sessions.values.filter { $0.activity != .idle }.sorted { $0.startedAt < $1.startedAt }
+        sessions.values.filter { $0.shown != .idle }.sorted { $0.startedAt < $1.startedAt }
     }
 
     func handle(_ payload: [String: Any]) {
@@ -55,6 +62,9 @@ final class AgentMonitor: ObservableObject {
         else { return }
         let now = Date()
         let agentID = payload["agent_id"] as? String
+        recentEvents.append([event, String(id.suffix(6)), agentID.map { "agent:" + $0.suffix(6) } ?? "main",
+                             payload["tool_name"] as? String ?? ""].joined(separator: " "))
+        if recentEvents.count > 60 { recentEvents.removeFirst(recentEvents.count - 60) }
         let project = (payload["cwd"] as? String).map { ($0 as NSString).lastPathComponent } ?? "Claude Code"
         var session = sessions[id]
             ?? Session(id: id, project: project, activity: .idle, startedAt: now, updatedAt: now)
@@ -66,16 +76,29 @@ final class AgentMonitor: ObservableObject {
             if session.activity == .idle { session.startedAt = now }
             session.activity = .thinking
             session.tool = nil
+            session.runningTools.removeAll()
         case "PreToolUse":
             if let agentID {
                 session.subagents.insert(agentID)
             } else {
-                let tool = payload["tool_name"] as? String
+                let tool = payload["tool_name"] as? String ?? ""
+                let callID = payload["tool_use_id"] as? String ?? UUID().uuidString
+                session.runningTools[callID] = tool
                 session.activity = tool == "AskUserQuestion" ? .question : .working
                 session.tool = tool
             }
         case "PostToolUse", "PostToolUseFailure":
-            if agentID == nil, session.activity != .idle {
+            guard agentID == nil, session.activity != .idle else { break }
+            if let callID = payload["tool_use_id"] as? String {
+                session.runningTools[callID] = nil
+            } else if let tool = payload["tool_name"] as? String,
+                      let key = session.runningTools.first(where: { $0.value == tool })?.key {
+                session.runningTools[key] = nil
+            }
+            if let still = session.runningTools.values.first {
+                session.activity = still == "AskUserQuestion" ? .question : .working
+                session.tool = still
+            } else {
                 session.activity = .thinking
                 session.tool = nil
             }
@@ -100,7 +123,7 @@ final class AgentMonitor: ObservableObject {
             guard agentID == nil else { break }
             session.activity = .idle
             session.tool = nil
-            session.subagents.removeAll()
+            session.runningTools.removeAll()
         case "SessionEnd":
             sessions[id] = nil
             onChange?()

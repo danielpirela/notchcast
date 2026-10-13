@@ -95,31 +95,23 @@ struct IslandView: View {
 
     private func statusHeader(_ geometry: IslandGeometry) -> some View {
         let focus = monitor.focus
-        let activity = focus?.activity ?? .idle
+        let activity = focus?.shown ?? .idle
         return HStack(spacing: 0) {
             HStack(spacing: 6) {
-                DriftColony(mood: activity.driftMood, subagents: focus?.subagents.count ?? 0)
-                if (focus?.subagents.count ?? 0) == 0 {
-                    Text(activity.label)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(activity == .waiting || activity == .question
-                                         ? IslandPalette.engine : IslandPalette.text)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .transition(.opacity)
-                }
+                ParentDrift(mood: activity.driftMood, subagents: focus?.subagents.count ?? 0)
+                    .zIndex(1)
+                Text(activity.label)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(activity == .waiting || activity == .question
+                                     ? IslandPalette.engine : IslandPalette.text)
+                    .lineLimit(1)
+                    .fixedSize()
             }
             .frame(width: 92, alignment: .leading)
             Spacer(minLength: geometry.hasNotch ? geometry.notch.width : 8)
             HStack(spacing: 7) {
-                if let count = focus?.subagents.count, count > 0 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "person.2.fill").font(.system(size: 9, weight: .semibold))
-                        Text("\(count)").font(.system(size: 11, weight: .semibold).monospacedDigit())
-                    }
-                    .foregroundStyle(IslandPalette.engine)
-                    .help("\(count) subagentes trabajando")
-                }
+                SubagentSwarm(count: focus?.subagents.count ?? 0,
+                              travel: geometry.size(for: .compact).width - 120)
                 if let started = focus?.startedAt {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         Text(Self.clock(context.date.timeIntervalSince(started)))
@@ -128,7 +120,7 @@ struct IslandView: View {
                     }
                 }
             }
-            .frame(width: 66, alignment: .trailing)
+            .frame(width: 96, alignment: .trailing)
         }
         .padding(.horizontal, 16)
         .frame(height: geometry.headerHeight)
@@ -148,7 +140,7 @@ struct IslandView: View {
                     }
                     ForEach(monitor.activeSessions) { session in
                         HStack(spacing: 10) {
-                            DriftView(mood: session.activity.driftMood, pixel: 1)
+                            DriftView(mood: session.shown.driftMood, pixel: 1)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(session.project)
                                     .font(.system(size: 13, weight: .semibold))
