@@ -1,0 +1,11 @@
+.build/
+.swiftpm/
+Notchcast.app/
+venv/
+voices/
+run/
+logs/
+muted
+voice
+__pycache__/
+.DS_Store
