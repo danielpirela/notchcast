@@ -46,8 +46,8 @@ struct IslandView: View {
     private func header(_ geometry: IslandGeometry) -> some View {
         HStack(spacing: 0) {
             HStack(spacing: 6) {
-                DriftView(mood: driftMood)
                 SourceBadge(source: speech.source)
+                DriftView(mood: driftMood)
                 LevelBars(level: speech.level, active: speech.phase == .speaking || speech.phase == .summarizing,
                           thinking: speech.phase == .summarizing)
             }
