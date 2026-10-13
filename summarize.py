@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Daniel Pirela
 """One-shot local summarizer for Notchcast.
 
 Reads the cleaned answer on stdin, prints {"summary": str, "backend": str, "ms": int} on stdout

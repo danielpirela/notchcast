@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Daniel Pirela
+
 import Foundation
 
 /// Unix-socket server. Each connection sends one JSON line and receives one JSON line back.

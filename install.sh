@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Daniel Pirela
 # Notchcast installer: builds the app, installs Piper + a voice, and registers the
 # Claude Code `Stop` hook in ~/.claude/settings.json (with a backup and a diff first).
 #

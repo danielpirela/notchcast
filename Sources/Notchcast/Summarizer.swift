@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Daniel Pirela
+
 import Foundation
 
 /// Runs summarize.py as a short-lived process: the model is loaded, used once and freed on exit.

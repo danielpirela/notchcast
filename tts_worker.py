@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Daniel Pirela
 """Persistent Piper worker.
 
 stdin:  JSON lines  {"cmd": "speak", "gen": int, "idx": int, "text": str}

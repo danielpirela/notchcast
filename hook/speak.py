@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Daniel Pirela
 """Claude Code `Stop` hook for Notchcast.
 
 Reads the hook JSON on stdin, cleans the final assistant message for speech and sends it

@@ -202,8 +202,16 @@ echo '**Some** markdown' | nc --clean   # preview what will be spoken
 
 Removes the hook from `settings.json` (with a backup), quits the app and optionally deletes `~/.claude/notchcast/`.
 
-## Licenses
+## License
 
-Third-party pieces are downloaded at install time, not bundled here:
-Piper (`piper-tts`) is GPL-3.0, MLX and `mlx-lm` are MIT, and Qwen3-4B-Instruct-2507 is Apache-2.0.
-Each Piper voice has its own license, listed in its model card on Hugging Face.
+Notchcast is free software, released under the [GNU General Public License v3.0 or later](LICENSE).
+Copyright (C) 2026 [Daniel Pirela](https://github.com/danielpirela).
+
+You can use, study, share and modify it. If you distribute a modified version, it must stay open
+source under the same license.
+
+Third-party components (Piper, the voices, MLX, the Qwen3 model, Ollama) are downloaded at install
+time, not bundled here; their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Notchcast is an independent project, not affiliated with or endorsed by Anthropic. Claude and Claude
+Code are trademarks of Anthropic.

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Daniel Pirela
 # Builds Notchcast.app (Apple Silicon) next to this script. No Xcode GUI needed.
 set -euo pipefail
 
