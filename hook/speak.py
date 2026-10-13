@@ -186,9 +186,10 @@ def send(message: dict, timeout: float = 2.0) -> dict | None:
         return None
 
 
-def deliver(text: str, session: str = "", project: str = "") -> bool:
+def deliver(text: str, session: str = "", cwd: str = "", transcript: str = "") -> bool:
     muted = MUTE_FLAG.exists()
-    message = {"cmd": "store" if muted else "speak", "text": text, "session": session, "project": project}
+    message = {"cmd": "store" if muted else "speak", "text": text, "session": session, "cwd": cwd,
+               "transcript": transcript}
     if send(message) is not None:
         return True
     if muted:
@@ -223,8 +224,8 @@ def main() -> int:
     text = payload.get("last_assistant_message") or last_message_from_transcript(payload.get("transcript_path"))
     spoken = clean(text or "")
     if spoken:
-        cwd = payload.get("cwd") or ""
-        deliver(spoken, session=payload.get("session_id") or "", project=Path(cwd).name if cwd else "")
+        deliver(spoken, session=payload.get("session_id") or "", cwd=payload.get("cwd") or "",
+                transcript=payload.get("transcript_path") or "")
     return 0
 
 

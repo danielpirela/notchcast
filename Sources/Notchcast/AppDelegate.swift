@@ -295,9 +295,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return ["ok": true, "muted": true]
             }
             let session = request["session"] as? String ?? ""
-            let project = request["project"] as? String ?? ""
-            receive(text, session: session.isEmpty ? "manual" : session,
-                    project: project.isEmpty ? "Claude Code" : project)
+            let project = monitor.name(of: session).flatMap { $0 == "Claude Code" ? nil : $0 }
+                ?? SessionNamer.name(transcript: request["transcript"] as? String, cwd: request["cwd"] as? String)
+            receive(text, session: session.isEmpty ? "manual" : session, project: project)
         case "store": speech.store(text)
         case "stop": stopSpeaking()
         case "next": skipToNext()

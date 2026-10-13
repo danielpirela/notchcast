@@ -20,6 +20,7 @@ final class AgentMonitor: ObservableObject {
         var runningTools: [String: String] = [:]
         var startedAt: Date
         var updatedAt: Date
+        var titleCheckedAt = Date.distantPast
 
         /// Background subagents keep a session busy after Claude's own turn ends.
         var shown: Activity { activity == .idle && !subagents.isEmpty ? .working : activity }
@@ -65,11 +66,13 @@ final class AgentMonitor: ObservableObject {
         recentEvents.append([event, String(id.suffix(6)), agentID.map { "agent:" + $0.suffix(6) } ?? "main",
                              payload["tool_name"] as? String ?? ""].joined(separator: " "))
         if recentEvents.count > 60 { recentEvents.removeFirst(recentEvents.count - 60) }
-        let project = (payload["cwd"] as? String).map { ($0 as NSString).lastPathComponent } ?? "Claude Code"
         var session = sessions[id]
-            ?? Session(id: id, project: project, activity: .idle, startedAt: now, updatedAt: now)
-        session.project = project
+            ?? Session(id: id, project: "Claude Code", activity: .idle, startedAt: now, updatedAt: now)
         session.updatedAt = now
+        if now.timeIntervalSince(session.titleCheckedAt) > 60 {
+            session.titleCheckedAt = now
+            refreshName(of: id, transcript: payload["transcript_path"] as? String, cwd: payload["cwd"] as? String)
+        }
 
         switch event {
         case "UserPromptSubmit":
@@ -135,6 +138,23 @@ final class AgentMonitor: ObservableObject {
         sessions[id] = session
         onChange?()
     }
+
+    /// Session name (title, folder or prompt), resolved off the main thread.
+    private func refreshName(of id: String, transcript: String?, cwd: String?) {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let name = SessionNamer.name(transcript: transcript, cwd: cwd)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, var session = self.sessions[id], session.project != name else { return }
+                    session.project = name
+                    self.sessions[id] = session
+                    self.onChange?()
+                }
+            }
+        }
+    }
+
+    func name(of session: String) -> String? { sessions[session]?.project }
 
     private func sweep() {
         let cutoff = Date().addingTimeInterval(-Self.staleAfter)

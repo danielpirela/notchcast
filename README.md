@@ -111,7 +111,9 @@ these defaults):
 
 ## Several sessions and the queue
 
-- Each answer carries its session and project. When more than one session is active, the voice starts with the project ("En notchcast-site. …"); old answers say how long ago ("Hace 5 minutos, en notchcast. …").
+- Each answer carries its session and a readable name: the session's title as shown in Claude Code
+  (read from its transcript), else the project folder (temporary "scratch" folders are skipped), else the
+  first words of your last prompt. When more than one session is active, the voice starts with the project ("En notchcast-site. …"); old answers say how long ago ("Hace 5 minutos, en notchcast. …").
 - A new answer never interrupts the one playing: it waits in the queue (the island shows **+N**). If the same session sends a newer answer before the old one is read, only the newest is kept.
 - **Siguiente** skips to the next answer; in the expanded island you can play any queued answer or discard it.
 - After you stop an answer by hand, the queue waits for **Siguiente** or the next new answer instead of carrying on.
