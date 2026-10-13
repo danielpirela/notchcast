@@ -75,8 +75,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .summarizing, .speaking, .paused:
             island.show()
         case .finished:
-            // Keep it open if the user is reading the expanded text.
-            if island.mode != .expanded { island.hide() }
+            // Keep it open if the user is reading the expanded text; otherwise let Drift wave first.
+            guard island.mode != .expanded else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.speech.phase == .finished, self.island.mode != .expanded else { return }
+                    self.island.hide()
+                }
+            }
         case .idle:
             island.hide()
         }

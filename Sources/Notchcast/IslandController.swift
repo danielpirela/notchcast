@@ -12,7 +12,7 @@ struct IslandGeometry {
     var hasNotch: Bool
     var notch: CGSize
 
-    static let ear: CGFloat = 92
+    static let ear: CGFloat = 112
 
     static func current() -> IslandGeometry {
         let screen = NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main ?? NSScreen.screens[0]

@@ -36,17 +36,18 @@ struct IslandView: View {
 
     private func header(_ geometry: IslandGeometry) -> some View {
         HStack(spacing: 0) {
-            HStack(spacing: 7) {
+            HStack(spacing: 6) {
+                DriftView(mood: driftMood)
                 SourceBadge(source: speech.source)
                 LevelBars(level: speech.level, active: speech.phase == .speaking || speech.phase == .summarizing,
                           thinking: speech.phase == .summarizing)
             }
-            .frame(width: 58, alignment: .leading)
+            .frame(width: 92, alignment: .leading)
             Spacer(minLength: geometry.hasNotch ? geometry.notch.width : 8)
             HStack(spacing: 8) {
                 Text(headerTrailing)
                     .font(.system(size: 12, weight: .medium).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(IslandPalette.text.opacity(0.85))
                     .lineLimit(1)
                 if speech.isBusy {
                     QuickStopButton(action: actions.stop)
@@ -62,6 +63,16 @@ struct IslandView: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Notchcast")
         .accessibilityAddTraits(.isButton)
+    }
+
+    private var driftMood: DriftMood {
+        switch speech.phase {
+        case .summarizing: return .thinking
+        case .speaking: return .speaking(level: speech.level)
+        case .paused: return .paused
+        case .finished: return .goodbye
+        case .idle: return .idle
+        }
     }
 
     private var headerTrailing: String {
@@ -126,8 +137,8 @@ struct IslandView: View {
         for sentence in paragraph.sentences {
             var part = AttributedString(sentence.text + " ")
             let isCurrent = sentence.id == speech.currentIndex && speech.isActive
-            part.foregroundColor = isCurrent ? .white : .white.opacity(speech.isActive ? 0.42 : 0.85)
-            if isCurrent { part.backgroundColor = Color.white.opacity(0.12) }
+            part.foregroundColor = isCurrent || !speech.isActive ? IslandPalette.text : IslandPalette.textDim
+            if isCurrent { part.backgroundColor = IslandPalette.highlight }
             result += part
         }
         return result
@@ -168,24 +179,42 @@ struct IslandShape: Shape {
     }
 }
 
-/// Which engine produced what is being spoken.
+/// Island colors from the Notchcast design tokens (dark system derived from Drift).
+enum IslandPalette {
+    static let engine = Color(hex: 0xF2A65A)
+    static let engineAlt = Color(hex: 0x8A9099)
+    static let text = Color(hex: 0xF5F5F7)
+    static let textDim = Color(hex: 0x7C818B)
+    static let highlight = Color(hex: 0x3A2A18)
+    static let speakingBars = [Color(hex: 0xFCE3C4), Color(hex: 0xF2A65A)]
+    static let summarizingBars = [Color(hex: 0xC9D1DC), Color(hex: 0x6F7A8A)]
+}
+
+/// Which engine produced what is being spoken (a car-style "engine" light for local summaries).
 struct SourceBadge: View {
     var source: SpeechController.Source
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.75))
-            .frame(width: 14)
+            .font(.system(size: 11, weight: source == .full ? .semibold : .heavy))
+            .foregroundStyle(color)
+            .frame(width: 16)
             .help(help)
             .accessibilityLabel(help)
     }
 
     private var symbol: String {
         switch source {
-        case .mlx: return "cpu"
-        case .ollama: return "server.rack"
+        case .mlx, .ollama: return "engine.combustion"
         case .full: return "text.alignleft"
+        }
+    }
+
+    private var color: Color {
+        switch source {
+        case .mlx: return IslandPalette.engine
+        case .ollama: return IslandPalette.engineAlt
+        case .full: return .white.opacity(0.75)
         }
     }
 
@@ -225,8 +254,8 @@ struct LevelBars: View {
     var thinking = false
 
     private static let weights: [Double] = [0.55, 0.85, 1.0, 0.8, 0.6]
-    private static let speakingColors = [Color(red: 0.45, green: 0.9, blue: 1), Color(red: 0.55, green: 0.6, blue: 1)]
-    private static let thinkingColors = [Color(red: 0.85, green: 0.6, blue: 1), Color(red: 0.6, green: 0.45, blue: 1)]
+    private static let speakingColors = IslandPalette.speakingBars
+    private static let thinkingColors = IslandPalette.summarizingBars
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !active)) { context in
