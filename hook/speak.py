@@ -36,8 +36,9 @@ AUTOLINK = re.compile(r"<(https?://|mailto:)[^>]+>")
 URL = re.compile(r"\b(?:https?://|www\.)\S+", re.IGNORECASE)
 INLINE_CODE = re.compile(r"`+([^`]+?)`+")
 HTML_TAG = re.compile(r"</?[A-Za-z][^>]*>")
-# A path with at least two separators, e.g. ~/.claude/settings.json or src/app/foo.ts:42
-LONG_PATH = re.compile(r"(?<![\w/])(?:~|\.{1,2})?/?(?:[\w.@+-]+/){2,}([\w.@+-]*)(?::\d+(?::\d+)?)?")
+# Rooted paths (~/x/y, /x/y, ./x/y) or relative ones with two or more separators (src/app/foo.ts:42)
+LONG_PATH = re.compile(
+    r"(?<![\w/~.])(?:(?:~|\.{1,2})?/(?:[\w.@+-]+/)+|(?:[\w.@+-]+/){2,})([\w.@+-]*)(?::\d+(?::\d+)?)?")
 EMPHASIS = [
     re.compile(r"\*\*(.+?)\*\*"),
     re.compile(r"__(.+?)__"),
@@ -75,7 +76,7 @@ def _inline(text: str) -> str:
     )
     text = re.sub(r"[*#`|<>]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
-    text = re.sub(r"\s+([.,;:!?)])", r"\1", text)
+    text = re.sub(r"\s+([.,;:!?)])(?=\s|$)", r"\1", text)
     text = re.sub(r"\(\s*\)", "", text)
     text = re.sub(r"([,;:])(\s*[,;:])+", r"\1", text)
     return text.strip(" ,;")
