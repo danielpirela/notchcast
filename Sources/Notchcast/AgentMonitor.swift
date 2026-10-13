@@ -107,7 +107,8 @@ final class AgentMonitor: ObservableObject {
         case "SubagentStop":
             if let agentID { session.subagents.remove(agentID) }
         case "PermissionRequest":
-            session.activity = .waiting
+            // Asking the user a question also goes through a permission request; keep the question face.
+            session.activity = payload["tool_name"] as? String == "AskUserQuestion" ? .question : .waiting
         case "Notification":
             switch payload["notification_type"] as? String {
             case "permission_prompt":
