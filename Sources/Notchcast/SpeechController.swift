@@ -15,15 +15,21 @@ struct Paragraph: Identifiable, Equatable {
 /// Splits text into sentences, streams them through Piper and plays the PCM from memory.
 @MainActor
 final class SpeechController: ObservableObject {
-    enum Phase: String { case idle, speaking, paused, finished }
+    enum Phase: String { case idle, summarizing, speaking, paused, finished }
+    /// What produced the text being spoken: a local summary (by backend) or the full answer.
+    enum Source: String { case mlx, ollama, full }
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var paragraphs: [Paragraph] = []
     @Published private(set) var currentIndex = -1
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var level: Float = 0
+    @Published private(set) var source: Source = .full
 
+    /// Last text spoken (the summary when summarizing is on).
     private(set) var lastText = ""
+    /// Last full answer as received from the hook.
+    private(set) var lastOriginal = ""
     private(set) var peakLevel: Float = 0
     private(set) var sentenceCount = 0
     var onPhaseChange: ((Phase) -> Void)?
@@ -37,8 +43,12 @@ final class SpeechController: ObservableObject {
     private var pending: [Int: Data] = [:]
     private var ticker: Timer?
     private var lastTick = Date()
+    private let summarizer = Summarizer()
+    private var summaryRequest = 0
 
     var isActive: Bool { phase == .speaking || phase == .paused }
+    /// Summarizing or speaking: something the stop button can cancel.
+    var isBusy: Bool { isActive || phase == .summarizing }
     var engineRunning: Bool { engine.isRunning }
 
     init(worker: TTSWorker, sampleRate: Double) {
@@ -52,6 +62,36 @@ final class SpeechController: ObservableObject {
     }
 
     // MARK: - Commands
+
+    /// Entry point for a new answer: summarizes it locally when enabled, then speaks.
+    func handle(_ text: String, config: AppConfig) {
+        cancelSummary()
+        halt()
+        lastOriginal = text
+        guard config.summarize, text.count >= config.minChars else {
+            source = .full
+            return speak(text)
+        }
+
+        source = config.backend == .mlx ? .mlx : .ollama
+        summaryRequest += 1
+        let request = summaryRequest
+        paragraphs = []
+        currentIndex = -1
+        elapsed = 0
+        setPhase(.summarizing)
+        summarizer.summarize(text, config: config) { [weak self] result in
+            guard let self, request == self.summaryRequest, self.phase == .summarizing else { return }
+            switch result {
+            case .success(let summary):
+                self.speak(summary)
+            case .failure(let failure):
+                NSLog("Notchcast: summary failed, speaking full answer: \(failure)")
+                self.source = .full
+                self.speak(text)
+            }
+        }
+    }
 
     func speak(_ text: String) {
         halt()
@@ -82,12 +122,14 @@ final class SpeechController: ObservableObject {
     /// Remembers text without speaking it (used while muted).
     func store(_ text: String) {
         lastText = text
+        lastOriginal = text
     }
 
     /// Loads the last text for reading, without audio.
     func presentLast() {
+        cancelSummary()
         halt()
-        paragraphs = Self.segment(lastText)
+        paragraphs = Self.segment(lastOriginal)
         currentIndex = -1
         setPhase(.idle)
     }
@@ -116,12 +158,18 @@ final class SpeechController: ObservableObject {
     }
 
     func stop() {
+        cancelSummary()
         halt()
         engine.stop()
         setPhase(.idle)
     }
 
     // MARK: - Playback pipeline
+
+    private func cancelSummary() {
+        summaryRequest += 1
+        summarizer.cancel()
+    }
 
     private func halt() {
         guard isActive else { return }

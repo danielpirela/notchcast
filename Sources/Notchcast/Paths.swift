@@ -27,6 +27,10 @@ enum Paths {
     static var voiceModel: URL { home.appendingPathComponent("voices/\(voiceName).onnx") }
     static var voiceConfig: URL { home.appendingPathComponent("voices/\(voiceName).onnx.json") }
     static var workerLog: URL { home.appendingPathComponent("logs/worker.log") }
+    static var summarizerLog: URL { home.appendingPathComponent("logs/summarizer.log") }
+    static var summarizeScript: URL { home.appendingPathComponent("summarize.py") }
+    static var models: URL { home.appendingPathComponent("models") }
+    static var config: URL { home.appendingPathComponent("config.json") }
 
     static func voiceSampleRate() -> Double {
         guard let data = try? Data(contentsOf: voiceConfig),

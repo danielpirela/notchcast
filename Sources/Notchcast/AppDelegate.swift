@@ -4,6 +4,9 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var muteItem: NSMenuItem!
+    private var summarizeItem: NSMenuItem!
+    private var backendItems: [SummaryBackend: NSMenuItem] = [:]
+    private var config = AppConfig.load()
     private var worker: TTSWorker!
     private var speech: SpeechController!
     private var island: IslandController!
@@ -61,12 +64,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func closeIsland() {
-        speech.isActive ? island.collapse() : island.hide()
+        speech.isBusy ? island.collapse() : island.hide()
     }
 
     private func phaseChanged(_ phase: SpeechController.Phase) {
         switch phase {
-        case .speaking, .paused:
+        case .summarizing, .speaking, .paused:
             island.show()
         case .finished:
             // Keep it open if the user is reading the expanded text.
@@ -84,12 +87,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(item("Repetir último", #selector(repeatLast)))
         menu.addItem(item("Leer último", #selector(readLast)))
         menu.addItem(.separator())
+        summarizeItem = item("Resumir con IA local", #selector(toggleSummarize))
+        menu.addItem(summarizeItem)
+        let backendMenu = NSMenu()
+        for backend in SummaryBackend.allCases {
+            let entry = item(backend == .mlx ? "MLX (nativo)" : "Ollama", #selector(selectBackend(_:)))
+            entry.representedObject = backend.rawValue
+            backendItems[backend] = entry
+            backendMenu.addItem(entry)
+        }
+        let backendRoot = NSMenuItem(title: "Motor de resumen", action: nil, keyEquivalent: "")
+        backendRoot.submenu = backendMenu
+        menu.addItem(backendRoot)
+        menu.addItem(.separator())
         muteItem = item("Silenciar", #selector(toggleMute))
         menu.addItem(muteItem)
         menu.addItem(.separator())
         menu.addItem(item("Salir", #selector(quit)))
         statusItem.menu = menu
         refreshMuteUI()
+        refreshSummaryUI()
     }
 
     private func item(_ title: String, _ action: Selector) -> NSMenuItem {
@@ -104,6 +121,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Notchcast")
     }
 
+    private func refreshSummaryUI() {
+        summarizeItem.state = config.summarize ? .on : .off
+        for (backend, entry) in backendItems {
+            entry.state = backend == config.backend ? .on : .off
+        }
+    }
+
+    private func updateConfig(_ change: (inout AppConfig) -> Void) {
+        change(&config)
+        config.save()
+        refreshSummaryUI()
+    }
+
+    @objc private func toggleSummarize() { updateConfig { $0.summarize.toggle() } }
+
+    @objc private func selectBackend(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let backend = SummaryBackend(rawValue: raw) else { return }
+        updateConfig { $0.backend = backend }
+    }
+
     @objc private func repeatLast() { speech.repeatLast() }
 
     @objc private func readLast() { showLast() }
@@ -113,7 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func quit() { NSApp.terminate(nil) }
 
     private func showLast() {
-        guard !speech.lastText.isEmpty else { return }
+        guard !speech.lastOriginal.isEmpty else { return }
         speech.presentLast()
         island.expand()
     }
@@ -138,7 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 speech.store(text)
                 return ["ok": true, "muted": true]
             }
-            speech.speak(text)
+            speech.handle(text, config: config)
         case "store": speech.store(text)
         case "stop": speech.stop()
         case "pause": speech.pause()
@@ -150,6 +187,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "longpress": longPressIsland()
         case "collapse": closeIsland()
         case "mute": setMuted(request["on"] as? Bool ?? true)
+        case "summarize": updateConfig { $0.summarize = request["on"] as? Bool ?? true }
+        case "backend":
+            guard let backend = SummaryBackend(rawValue: request["name"] as? String ?? "") else {
+                return ["ok": false, "error": "backend must be mlx or ollama"]
+            }
+            updateConfig { $0.backend = backend }
         case "status": break
         case "quit":
             DispatchQueue.main.async { NSApp.terminate(nil) }
@@ -177,6 +220,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "engineRunning": speech.engineRunning,
             "workerReady": worker.isReady,
             "muted": isMuted,
+            "summarize": config.summarize,
+            "backend": config.backend.rawValue,
+            "source": speech.source.rawValue,
+            "spokenText": speech.lastText,
             "lastTextLength": speech.lastText.count,
         ]
     }

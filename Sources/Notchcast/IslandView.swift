@@ -33,13 +33,24 @@ struct IslandView: View {
 
     private func header(_ geometry: IslandGeometry) -> some View {
         HStack(spacing: 0) {
-            LevelBars(level: speech.level, active: speech.phase == .speaking)
-                .frame(width: 34, alignment: .leading)
+            HStack(spacing: 7) {
+                SourceBadge(source: speech.source)
+                LevelBars(level: speech.level, active: speech.phase == .speaking || speech.phase == .summarizing,
+                          thinking: speech.phase == .summarizing)
+            }
+            .frame(width: 58, alignment: .leading)
             Spacer(minLength: geometry.hasNotch ? geometry.notch.width : 8)
-            Text(headerTrailing)
-                .font(.system(size: 12, weight: .medium).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.8))
-                .frame(width: 44, alignment: .trailing)
+            HStack(spacing: 8) {
+                Text(headerTrailing)
+                    .font(.system(size: 12, weight: .medium).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.8))
+                    .lineLimit(1)
+                if speech.isBusy {
+                    QuickStopButton(action: actions.stop)
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .frame(width: 66, alignment: .trailing)
         }
         .padding(.horizontal, 16)
         .frame(height: geometry.headerHeight)
@@ -53,6 +64,7 @@ struct IslandView: View {
     private var headerTrailing: String {
         switch speech.phase {
         case .idle where speech.currentIndex < 0: return ""
+        case .summarizing: return "···"
         case .paused: return "❙❙ " + Self.clock(speech.elapsed)
         default: return Self.clock(speech.elapsed)
         }
@@ -65,6 +77,11 @@ struct IslandView: View {
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 10) {
+                        if speech.phase == .summarizing {
+                            Text("Resumiendo con \(speech.source == .ollama ? "Ollama" : "MLX")…")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.white.opacity(0.6))
+                        }
                         ForEach(speech.paragraphs) { paragraph in
                             Text(attributed(paragraph))
                                 .font(.system(size: 14))
@@ -94,7 +111,7 @@ struct IslandView: View {
                           action: actions.togglePause)
                 .disabled(!speech.isActive)
             ControlButton(symbol: "stop.fill", label: "Parar", action: actions.stop)
-                .disabled(!speech.isActive)
+                .disabled(!speech.isBusy)
             ControlButton(symbol: "arrow.counterclockwise", label: "Repetir", action: actions.repeatLast)
                 .disabled(speech.lastText.isEmpty)
             ControlButton(symbol: "chevron.up", label: "Cerrar", action: actions.close)
@@ -148,12 +165,65 @@ struct IslandShape: Shape {
     }
 }
 
+/// Which engine produced what is being spoken.
+struct SourceBadge: View {
+    var source: SpeechController.Source
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.75))
+            .frame(width: 14)
+            .help(help)
+            .accessibilityLabel(help)
+    }
+
+    private var symbol: String {
+        switch source {
+        case .mlx: return "cpu"
+        case .ollama: return "server.rack"
+        case .full: return "text.alignleft"
+        }
+    }
+
+    private var help: String {
+        switch source {
+        case .mlx: return "Resumen local con MLX"
+        case .ollama: return "Resumen local con Ollama"
+        case .full: return "Respuesta completa"
+        }
+    }
+}
+
+/// Small always-visible stop control in the compact island.
+struct QuickStopButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "stop.fill")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(Color.white.opacity(0.18)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help("Parar")
+        .accessibilityLabel("Parar")
+    }
+}
+
 /// Bars driven by the real output level; a small per-bar wobble keeps them from moving in lockstep.
+/// While summarizing they show a gentle "thinking" wave instead.
 struct LevelBars: View {
     var level: Float
     var active: Bool
+    var thinking = false
 
     private static let weights: [Double] = [0.55, 0.85, 1.0, 0.8, 0.6]
+    private static let speakingColors = [Color(red: 0.45, green: 0.9, blue: 1), Color(red: 0.55, green: 0.6, blue: 1)]
+    private static let thinkingColors = [Color(red: 0.85, green: 0.6, blue: 1), Color(red: 0.6, green: 0.45, blue: 1)]
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !active)) { context in
@@ -161,9 +231,12 @@ struct LevelBars: View {
             HStack(spacing: 3) {
                 ForEach(0..<5, id: \.self) { i in
                     let wobble = 0.65 + 0.35 * sin(t * 10 + Double(i) * 1.9)
-                    let height = 3 + CGFloat(Double(level) * Self.weights[i] * wobble) * 15
+                    let wave = 0.5 + 0.5 * sin(t * 5 - Double(i) * 0.9)
+                    let height = thinking
+                        ? 4 + CGFloat(wave) * 8
+                        : 3 + CGFloat(Double(level) * Self.weights[i] * wobble) * 15
                     Capsule()
-                        .fill(LinearGradient(colors: [Color(red: 0.45, green: 0.9, blue: 1), Color(red: 0.55, green: 0.6, blue: 1)],
+                        .fill(LinearGradient(colors: thinking ? Self.thinkingColors : Self.speakingColors,
                                              startPoint: .top, endPoint: .bottom))
                         .frame(width: 3, height: height)
                 }
