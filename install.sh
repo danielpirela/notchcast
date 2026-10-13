@@ -148,4 +148,4 @@ fi
 # --- Launch ------------------------------------------------------------------------------
 open -g "$DEST/Notchcast.app"
 say "Done. Look for the waveform icon in the menu bar."
-echo "  Test it:  $DEST/venv/bin/python -I $DEST/hook/speak.py --cmd speak text='Hola, ya funciono.'"
+echo "  Test it:  $DEST/venv/bin/python -I $DEST/hook/speak.py --cmd speak text='Hola, ya funcionó.'"
