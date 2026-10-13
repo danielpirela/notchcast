@@ -16,6 +16,8 @@ struct AppConfig: Codable, Equatable {
     var ollamaURL = "http://127.0.0.1:11434"
     /// Answers shorter than this are spoken as-is (summarizing them would only add latency).
     var minChars = 300
+    /// Show what Claude Code is doing (thinking, tools, subagents) while it works.
+    var showAgentStatus = true
 
     init() {}
 
@@ -28,6 +30,7 @@ struct AppConfig: Codable, Equatable {
         ollamaModel = try c.decodeIfPresent(String.self, forKey: .ollamaModel) ?? defaults.ollamaModel
         ollamaURL = try c.decodeIfPresent(String.self, forKey: .ollamaURL) ?? defaults.ollamaURL
         minChars = try c.decodeIfPresent(Int.self, forKey: .minChars) ?? defaults.minChars
+        showAgentStatus = try c.decodeIfPresent(Bool.self, forKey: .showAgentStatus) ?? defaults.showAgentStatus
     }
 
     static func load() -> AppConfig {

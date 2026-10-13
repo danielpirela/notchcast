@@ -17,22 +17,23 @@ path = sys.argv[1]
 with open(path, encoding="utf-8") as f:
     settings = json.load(f)
 hooks = settings.get("hooks", {})
-groups = []
-for group in hooks.get("Stop", []):
-    kept = [h for h in group.get("hooks", []) if "notchcast/hook/speak.py" not in h.get("command", "")]
-    if kept:
-        groups.append({**group, "hooks": kept})
-if groups:
-    hooks["Stop"] = groups
-else:
-    hooks.pop("Stop", None)
+for event_name in list(hooks):
+    groups = []
+    for group in hooks[event_name]:
+        kept = [h for h in group.get("hooks", []) if "notchcast/hook/" not in h.get("command", "")]
+        if kept:
+            groups.append({**group, "hooks": kept})
+    if groups:
+        hooks[event_name] = groups
+    else:
+        hooks.pop(event_name)
 if not hooks:
     settings.pop("hooks", None)
 with open(path, "w", encoding="utf-8") as f:
     json.dump(settings, f, indent=2, ensure_ascii=False)
     f.write("\n")
 PY
-    echo "Stop hook removed from $SETTINGS (backup saved next to it)."
+    echo "Notchcast hooks removed from $SETTINGS (backup saved next to it)."
 fi
 
 read -r -p "Also delete $DEST (app, venv, voices)? [y/N] " answer

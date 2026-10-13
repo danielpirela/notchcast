@@ -12,6 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var config = AppConfig.load()
     private var worker: TTSWorker!
     private var speech: SpeechController!
+    private var monitor: AgentMonitor!
+    private var statusItemToggle: NSMenuItem!
+    private var waveUntil = Date.distantPast
     private var island: IslandController!
     private var server: IPCServer!
     private var lastLongPress = Date.distantPast
@@ -27,8 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         worker = TTSWorker()
         worker.start()
         speech = SpeechController(worker: worker, sampleRate: Paths.voiceSampleRate())
-        island = IslandController(speech: speech, actions: makeActions())
+        monitor = AgentMonitor()
+        island = IslandController(speech: speech, monitor: monitor, actions: makeActions())
         speech.onPhaseChange = { [weak self] phase in self?.phaseChanged(phase) }
+        monitor.onChange = { [weak self] in self?.refreshIsland() }
         setUpStatusItem()
 
         server = IPCServer(path: Paths.socket) { [weak self] request in
@@ -67,23 +72,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func closeIsland() {
-        speech.isBusy ? island.collapse() : island.hide()
+        guard island.mode == .expanded else { return island.hide() }
+        island.collapse()
+        refreshIsland()
     }
 
     private func phaseChanged(_ phase: SpeechController.Phase) {
-        switch phase {
-        case .summarizing, .speaking, .paused:
-            island.show()
-        case .finished:
-            // Keep it open if the user is reading the expanded text; otherwise let Drift wave first.
-            guard island.mode != .expanded else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { [weak self] in
-                MainActor.assumeIsolated {
-                    guard let self, self.speech.phase == .finished, self.island.mode != .expanded else { return }
-                    self.island.hide()
-                }
+        if phase == .finished {
+            // Let Drift wave goodbye before the island closes or returns to Claude's status.
+            waveUntil = Date().addingTimeInterval(1.1)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.15) { [weak self] in
+                MainActor.assumeIsolated { self?.refreshIsland() }
             }
-        case .idle:
+        }
+        refreshIsland()
+    }
+
+    /// Single place that decides what the island shows: speech first, then Claude's live status.
+    private func refreshIsland() {
+        let speaking = speech.isBusy || (speech.phase == .finished && Date() < waveUntil)
+        if speaking {
+            island.content = .speech
+            island.show()
+        } else if config.showAgentStatus, monitor.isActive {
+            if island.mode != .expanded { island.content = .status }
+            island.show()
+        } else if island.mode != .expanded {
+            // An expanded island stays until the user closes it (they may be reading).
             island.hide()
         }
     }
@@ -109,6 +124,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         backendRoot.submenu = backendMenu
         menu.addItem(backendRoot)
         menu.addItem(.separator())
+        statusItemToggle = item("Mostrar estado de Claude", #selector(toggleAgentStatus))
+        menu.addItem(statusItemToggle)
+        menu.addItem(.separator())
         muteItem = item("Silenciar", #selector(toggleMute))
         menu.addItem(muteItem)
         menu.addItem(.separator())
@@ -132,6 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshSummaryUI() {
         summarizeItem.state = config.summarize ? .on : .off
+        statusItemToggle.state = config.showAgentStatus ? .on : .off
         for (backend, entry) in backendItems {
             entry.state = backend == config.backend ? .on : .off
         }
@@ -144,6 +163,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleSummarize() { updateConfig { $0.summarize.toggle() } }
+
+    @objc private func toggleAgentStatus() {
+        updateConfig { $0.showAgentStatus.toggle() }
+        refreshIsland()
+    }
 
     @objc private func selectBackend(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let backend = SummaryBackend(rawValue: raw) else { return }
@@ -161,6 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showLast() {
         guard !speech.lastOriginal.isEmpty else { return }
         speech.presentLast()
+        island.content = .speech
         island.expand()
     }
 
@@ -196,6 +221,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "longpress": longPressIsland()
         case "collapse": closeIsland()
         case "mute": setMuted(request["on"] as? Bool ?? true)
+        case "event":
+            if let payload = request["payload"] as? [String: Any] { monitor.handle(payload) }
+            return ["ok": true]
         case "summarize": updateConfig { $0.summarize = request["on"] as? Bool ?? true }
         case "backend":
             guard let backend = SummaryBackend(rawValue: request["name"] as? String ?? "") else {
@@ -233,6 +261,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "backend": config.backend.rawValue,
             "source": speech.source.rawValue,
             "spokenText": speech.lastText,
+            "content": island.content.rawValue,
+            "showAgentStatus": config.showAgentStatus,
+            "agent": monitor.focus.map { ["project": $0.project, "activity": $0.activity.rawValue,
+                                          "tool": $0.tool ?? "", "subagents": $0.subagents.count] as [String: Any] }
+                ?? [:],
+            "activeSessions": monitor.activeSessions.count,
             "lastTextLength": speech.lastText.count,
         ]
     }

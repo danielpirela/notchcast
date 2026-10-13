@@ -68,17 +68,20 @@ struct IslandActions {
 @MainActor
 final class IslandController: ObservableObject {
     enum Mode: String { case hidden, compact, expanded }
+    /// What the island is about: reading an answer aloud, or Claude Code's live status.
+    enum Content: String { case speech, status }
 
     @Published private(set) var mode: Mode = .hidden
     @Published private(set) var visual: IslandVisual = .closed
     @Published private(set) var geometry = IslandGeometry.current()
+    @Published var content: Content = .speech
 
     private var panel: IslandPanel!
     private let spring = Animation.spring(response: 0.42, dampingFraction: 0.78)
     private let settle: TimeInterval = 0.5
 
-    init(speech: SpeechController, actions: IslandActions) {
-        let view = IslandView(island: self, speech: speech, actions: actions)
+    init(speech: SpeechController, monitor: AgentMonitor, actions: IslandActions) {
+        let view = IslandView(island: self, speech: speech, monitor: monitor, actions: actions)
         panel = IslandPanel(content: view)
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main

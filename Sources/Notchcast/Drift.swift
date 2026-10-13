@@ -24,6 +24,10 @@ enum DriftSprites {
     private static let eyesShut = ["..aaaaaaaaaaaa..", ".aaakkaaaakkaaa."]
     private static let eyesHappy = ["..aaakaaaakaaa..", ".aaakakaakakaaa."]
     private static let eyesDown = ["..aaaaaaaaaaaa..", ".aaaakaaaakaaaa."]
+    // Doubt: one round eye, the other a raised brow.
+    private static let eyesDoubt = ["..aaakaaaakkaa..", ".aaaakaaaaaaaaa."]
+    private static let eyesDoubtShift = ["..aaakaaaaakka..", ".aaaakaaaaaaaaa."]
+    private static let mouthDoubt = [".aaaaaaaakkaaaa.", ".ssssssssssssss."]
     private static let mouthNone = [".aaaaaaaaaaaaaa.", ".ssssssssssssss."]
     private static let mouthSmall = [".aaaaaakkaaaaaa.", ".ssssssssssssss."]
     private static let mouthWide = [".aaaaakkkkaaaaa.", ".sssssskkssssss."]
@@ -39,6 +43,17 @@ enum DriftSprites {
     private static let laptopRightUp = ["....llllllll.h..", "..h.llllwlll.a..", "..a.llllllll....", "..mmmmmmmmmmmm.."]
 
     private static func bell(_ eyes: [String], _ mouth: [String]) -> [String] { top + [crown] + eyes + mouth }
+
+    /// Paints white pixels at (row, column) positions over a frame.
+    private static func overlay(_ rows: [String], _ points: [(Int, Int)]) -> [String] {
+        var out = rows
+        for (row, column) in points {
+            var chars = Array(out[row])
+            chars[column] = "w"
+            out[row] = String(chars)
+        }
+        return out
+    }
 
     private static func pad(_ rows: [String]) -> [String] {
         rows.count >= 16 ? Array(rows.prefix(16)) : rows + Array(repeating: empty, count: 16 - rows.count)
@@ -68,6 +83,13 @@ enum DriftSprites {
         pad([empty, empty] + bell(eyesDown, mouthNone) + laptopLeftUp),
         pad([empty, empty] + bell(eyesDown, mouthNone) + laptopRightUp),
     ]
+    static let question: [[String]] = {
+        let mark = [(0, 13), (0, 14), (1, 15), (2, 14), (4, 14)]
+        let still = pad([empty] + bell(eyesDoubt, mouthDoubt) + tentQuiet)
+        let tilt = pad([empty] + bell(eyesDoubtShift, mouthDoubt) + tentSway)
+        return [overlay(still, mark), overlay(still, mark), overlay(tilt, mark), overlay(tilt, mark),
+                overlay(still, mark), tilt]
+    }()
     static let alert: [[String]] = {
         let body = pad([empty] + bell(eyesOpen, mouthSmall) + tentMid)
         var flagged = body
@@ -82,7 +104,7 @@ enum DriftSprites {
 
 /// What Drift is doing; each mood maps to a frame loop.
 enum DriftMood: Equatable {
-    case idle, thinking, working, waiting, speaking(level: Float), paused, goodbye
+    case idle, thinking, working, waiting, question, speaking(level: Float), paused, goodbye
 }
 
 /// Renders Drift crisply: each sprite pixel is a whole number of device pixels and same-color runs
@@ -116,6 +138,8 @@ struct DriftView: View {
             return loop(DriftSprites.work, hold: 2)
         case .waiting:
             return loop(DriftSprites.alert, hold: 4)
+        case .question:
+            return loop(DriftSprites.question, hold: 3)
         case .speaking(let level):
             if level < 0.3 { return DriftSprites.speakQuiet }
             return level < 0.6 ? DriftSprites.speakMid : DriftSprites.speakLoud
@@ -142,6 +166,51 @@ struct DriftView: View {
                 x = end
             }
         }
+    }
+}
+
+/// Drift plus one mini Drift per running subagent. A new subagent plays a "cell division":
+/// Drift stretches, then the copy splits off and slides into place.
+struct DriftColony: View {
+    var mood: DriftMood
+    var subagents: Int
+
+    @State private var clones = 0
+    @State private var stretched = false
+    private static let maxClones = 2
+
+    var body: some View {
+        HStack(spacing: 1) {
+            DriftView(mood: mood)
+                .scaleEffect(x: stretched ? 1.22 : 1, y: stretched ? 0.84 : 1, anchor: .center)
+                .zIndex(1)
+            ForEach(0..<min(clones, Self.maxClones), id: \.self) { _ in
+                DriftView(mood: .working, pixel: 1)
+                    .transition(.asymmetric(
+                        insertion: .offset(x: -16).combined(with: .scale(scale: 1.5)).combined(with: .opacity),
+                        removal: .scale(scale: 0.4).combined(with: .opacity)))
+            }
+            if clones > Self.maxClones {
+                Text("+\(clones - Self.maxClones)")
+                    .font(.system(size: 10, weight: .bold).monospacedDigit())
+                    .foregroundStyle(IslandPalette.engine)
+            }
+        }
+        .onAppear { clones = subagents }
+        .onChange(of: subagents) { old, new in
+            guard new > old else {
+                withAnimation(.easeOut(duration: 0.3)) { clones = new }
+                return
+            }
+            withAnimation(.easeOut(duration: 0.18)) { stretched = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.62)) {
+                    stretched = false
+                    clones = new
+                }
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 

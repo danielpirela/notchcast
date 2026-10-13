@@ -4,21 +4,24 @@
 # Notchcast installer: builds the app, installs Piper + a voice, and registers the
 # Claude Code `Stop` hook in ~/.claude/settings.json (with a backup and a diff first).
 #
-# Usage: ./install.sh [--voice NAME] [--no-summary] [--yes]
+# Usage: ./install.sh [--voice NAME] [--no-summary] [--skip-settings] [--yes]
 #   --voice NAME   Piper voice to download (default: es_MX-claude-high)
 #   --no-summary   skip the local summarizer (MLX + model) and turn summaries off
+#   --skip-settings  don't touch ~/.claude/settings.json (redeploy the app only)
 #   --yes          don't ask for confirmation (downloads + settings change)
 set -euo pipefail
 
 VOICE="es_MX-claude-high"
 ASSUME_YES=0
 SUMMARY=1
+SKIP_SETTINGS=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --voice) VOICE="$2"; shift 2 ;;
         --yes|-y) ASSUME_YES=1; shift ;;
         --no-summary) SUMMARY=0; shift ;;
-        -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+        --skip-settings) SKIP_SETTINGS=1; shift ;;
+        -h|--help) sed -n '4,12p' "$0"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -115,7 +118,7 @@ if [[ "$SRC" != "$DEST" ]]; then
     rsync -a "$SRC/hook/" "$DEST/hook/"
     cp "$SRC/Package.swift" "$SRC/tts_worker.py" "$SRC/summarize.py" "$SRC/build.sh" "$SRC/uninstall.sh" "$DEST/"
 fi
-chmod +x "$DEST/build.sh" "$DEST/uninstall.sh"
+chmod +x "$DEST/build.sh" "$DEST/uninstall.sh" "$DEST/hook/event.sh"
 
 # --- Piper + voice -----------------------------------------------------------------------
 if (( need_piper )); then
@@ -159,7 +162,10 @@ say "Building Notchcast.app"
 xattr -dr com.apple.quarantine "$DEST/Notchcast.app" 2>/dev/null || true
 
 # --- Claude Code hook --------------------------------------------------------------------
-say "Registering the Stop hook in $SETTINGS"
+if (( SKIP_SETTINGS )); then
+    say "Skipping $SETTINGS (--skip-settings)"
+else
+say "Registering the Claude Code hooks in $SETTINGS"
 mkdir -p "$(dirname "$SETTINGS")"
 [[ -f "$SETTINGS" ]] || echo '{}' > "$SETTINGS"
 NEW_SETTINGS="$(mktemp)"
@@ -168,12 +174,21 @@ import json, sys
 src, dst = sys.argv[1], sys.argv[2]
 with open(src, encoding="utf-8") as f:
     settings = json.load(f)
-command = '"$HOME/.claude/notchcast/venv/bin/python" -I "$HOME/.claude/notchcast/hook/speak.py"'
-stop = settings.setdefault("hooks", {}).setdefault("Stop", [])
-already = any("notchcast/hook/speak.py" in h.get("command", "")
-              for group in stop for h in group.get("hooks", []))
-if not already:
-    stop.append({"hooks": [{"type": "command", "command": command, "async": True, "timeout": 15}]})
+speak = '"$HOME/.claude/notchcast/venv/bin/python" -I "$HOME/.claude/notchcast/hook/speak.py"'
+event = '"$HOME/.claude/notchcast/hook/event.sh"'
+# Live status events (thinking, tools, subagents, waiting); the Stop hook also speaks the answer.
+STATUS_EVENTS = ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStart",
+                 "SubagentStop", "PermissionRequest", "Notification", "Stop", "StopFailure", "SessionEnd"]
+hooks = settings.setdefault("hooks", {})
+
+def ensure(event_name, script, command, timeout):
+    groups = hooks.setdefault(event_name, [])
+    if not any(script in h.get("command", "") for g in groups for h in g.get("hooks", [])):
+        groups.append({"hooks": [{"type": "command", "command": command, "async": True, "timeout": timeout}]})
+
+ensure("Stop", "notchcast/hook/speak.py", speak, 15)
+for name in STATUS_EVENTS:
+    ensure(name, "notchcast/hook/event.sh", event, 5)
 with open(dst, "w", encoding="utf-8") as f:
     json.dump(settings, f, indent=2, ensure_ascii=False)
     f.write("\n")
@@ -193,6 +208,8 @@ else
         rm -f "$NEW_SETTINGS"
         echo "  Skipped. Add the hook manually (see README.md)."
     fi
+fi
+
 fi
 
 # --- Launch ------------------------------------------------------------------------------

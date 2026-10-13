@@ -6,7 +6,10 @@ import SwiftUI
 struct IslandView: View {
     @ObservedObject var island: IslandController
     @ObservedObject var speech: SpeechController
+    @ObservedObject var monitor: AgentMonitor
     let actions: IslandActions
+
+    private var showsStatus: Bool { island.content == .status }
 
     var body: some View {
         let geometry = island.geometry
@@ -17,10 +20,16 @@ struct IslandView: View {
         ZStack(alignment: .top) {
             shape.fill(Color.black)
             VStack(spacing: 0) {
-                header(geometry)
+                Group {
+                    if showsStatus { statusHeader(geometry) } else { header(geometry) }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { actions.tap() }
                 if island.visual == .expanded {
-                    expandedBody
-                        .transition(.opacity.combined(with: .offset(y: -8)))
+                    Group {
+                        if showsStatus { statusBody } else { expandedBody }
+                    }
+                    .transition(.opacity.combined(with: .offset(y: -8)))
                 }
             }
             .opacity(island.visual == .closed ? 0 : 1)
@@ -58,11 +67,100 @@ struct IslandView: View {
         }
         .padding(.horizontal, 16)
         .frame(height: geometry.headerHeight)
-        .contentShape(Rectangle())
-        .onTapGesture { actions.tap() }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Notchcast")
         .accessibilityAddTraits(.isButton)
+    }
+
+    // MARK: Claude Code status
+
+    private func statusHeader(_ geometry: IslandGeometry) -> some View {
+        let focus = monitor.focus
+        let activity = focus?.activity ?? .idle
+        return HStack(spacing: 0) {
+            HStack(spacing: 6) {
+                DriftColony(mood: activity.driftMood, subagents: focus?.subagents.count ?? 0)
+                if (focus?.subagents.count ?? 0) == 0 {
+                    Text(activity.label)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(activity == .waiting || activity == .question
+                                         ? IslandPalette.engine : IslandPalette.text)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .transition(.opacity)
+                }
+            }
+            .frame(width: 92, alignment: .leading)
+            Spacer(minLength: geometry.hasNotch ? geometry.notch.width : 8)
+            HStack(spacing: 7) {
+                if let count = focus?.subagents.count, count > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "person.2.fill").font(.system(size: 9, weight: .semibold))
+                        Text("\(count)").font(.system(size: 11, weight: .semibold).monospacedDigit())
+                    }
+                    .foregroundStyle(IslandPalette.engine)
+                    .help("\(count) subagentes trabajando")
+                }
+                if let started = focus?.startedAt {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(Self.clock(context.date.timeIntervalSince(started)))
+                            .font(.system(size: 12, weight: .medium).monospacedDigit())
+                            .foregroundStyle(IslandPalette.text.opacity(0.85))
+                    }
+                }
+            }
+            .frame(width: 66, alignment: .trailing)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: geometry.headerHeight)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Claude Code: \(activity.label)")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var statusBody: some View {
+        VStack(spacing: 12) {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if monitor.activeSessions.isEmpty {
+                        Text("Claude no está trabajando ahora.")
+                            .font(.system(size: 14))
+                            .foregroundStyle(IslandPalette.textDim)
+                    }
+                    ForEach(monitor.activeSessions) { session in
+                        HStack(spacing: 10) {
+                            DriftView(mood: session.activity.driftMood, pixel: 1)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(session.project)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(IslandPalette.text)
+                                Text(Self.detail(session))
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(IslandPalette.textDim)
+                            }
+                            Spacer()
+                        }
+                    }
+                }
+                .padding(.horizontal, 22)
+                .padding(.top, 6)
+            }
+            HStack(spacing: 22) {
+                ControlButton(symbol: "arrow.counterclockwise", label: "Repetir", action: actions.repeatLast)
+                    .disabled(speech.lastText.isEmpty)
+                ControlButton(symbol: "chevron.up", label: "Cerrar", action: actions.close)
+            }
+        }
+        .padding(.bottom, 14)
+    }
+
+    private static func detail(_ session: AgentMonitor.Session) -> String {
+        var parts = [session.activity.label]
+        if let tool = session.tool, session.activity == .working { parts[0] = "Usando \(tool)" }
+        if !session.subagents.isEmpty {
+            parts.append(session.subagents.count == 1 ? "1 subagente" : "\(session.subagents.count) subagentes")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private var driftMood: DriftMood {
